@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="batting-header">
+  <form class="search" action="{{ url_for('bowling') }}" method="get" autocomplete="off">
+    <div class="search-wrap">
+      <input id="qb" type="text" name="q" value="{{ q }}" placeholder="🔎  Search bowler..." />
+      <div id="b-suggestions" class="suggestions-pop"></div>
+    </div>
+    <button type="submit">Search</button>
+  </form>
+</div>
+
+{% if bowler_name and stats %}
+  <h1 class="page-title">{{ bowler_name }}</h1>
+
+  <div class="tabs">
+    <div class="tab-list" role="tablist">
+      <button class="tab-btn active" data-tab="odi"  role="tab" aria-selected="true">odi</button>
+      <button class="tab-btn"        data-tab="t20"  role="tab" aria-selected="false">t20</button>
+      <button class="tab-btn"        data-tab="test" role="tab" aria-selected="false">test</button>
+    </div>
+
+    <div class="tab-panels">
+      <div id="panel-odi" class="tab-panel active" role="tabpanel">
+        {% set p = stats['odi'] %}
+        {% include 'partials/_bowl_stats_grid.html' %}
+      </div>
+      <div id="panel-t20" class="tab-panel" role="tabpanel">
+        {% set p = stats['t20'] %}
+        {% include 'partials/_bowl_stats_grid.html' %}
+      </div>
+      <div id="panel-test" class="tab-panel" role="tabpanel">
+        {% set p = stats['test'] %}
+        {% include 'partials/_bowl_stats_grid.html' %}
+      </div>
+    </div>
+  </div>
+
+{% else %}
+  <div class="card">
+    <h2 style="margin:0 0 .5rem;">Find bowling stats</h2>
+    <p style="color:var(--muted)">Start typing a bowler and pick from the suggestions. Tabs show <b>odi</b>, <b>t20</b>, and <b>test</b>. Missing formats display zeros.</p>
+  </div>
+{% endif %}
+
+<script>
+(function(){
+  // --- live suggestions for bowlers ---
+  const input = document.getElementById('qb');
+  const pop   = document.getElementById('b-suggestions');
+  const wrap  = document.querySelector('.search-wrap');
+
+  function debounce(fn, delay){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), delay); }; }
+
+  async function fetchNames(q){
+    if (!q){ pop.style.display='none'; pop.innerHTML=''; return; }
+    try{
+      const r = await fetch(`/api/bowlers?q=${encodeURIComponent(q)}`);
+      if(!r.ok) return;
+      const data = await r.json();
+      pop.innerHTML = '';
+      if (!data.names || !data.names.length){ pop.style.display='none'; return; }
+      data.names.forEach(name=>{
+        const btn = document.createElement('button');
+        btn.type='button'; btn.className='suggest-item'; btn.textContent=name;
+        btn.onclick = ()=>{ input.value=name; pop.style.display='none'; };
+        pop.appendChild(btn);
+      });
+      pop.style.display='block';
+    }catch(e){}
+  }
+  const run = debounce(fetchNames, 120);
+  input && input.addEventListener('input', e => run(e.target.value));
+  document.addEventListener('click', e=>{ if(!wrap.contains(e.target)) pop.style.display='none'; });
+
+  // --- tabs ---
+  const buttons = document.querySelectorAll('.tab-btn');
+  const panels  = {
+    'odi':  document.getElementById('panel-odi'),
+    't20':  document.getElementById('panel-t20'),
+    'test': document.getElementById('panel-test'),
+  };
+  buttons.forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      buttons.forEach(b=>b.classList.remove('active'));
+      Object.values(panels).forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      panels[btn.getAttribute('data-tab')].classList.add('active');
+    });
+  });
+})();
+</script>
+
+{% endblock %}

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card" style="padding:20px;">
+  <h2 style="margin:0 0 .75rem;">Prediction</h2>
+  <p style="color:var(--muted); margin:0 0 1rem;">
+    Choose <b>Type</b>, <b>Format</b>, <b>Player</b>, <b>Venue</b>, and <b>Opposition</b>.
+  </p>
+
+  <form id="pred-form" onsubmit="return false;">
+    <div class="pred-row">
+      <div class="field">
+        <label>Type</label>
+        <select id="p-type">
+          <option value="batting" selected>Batting</option>
+          <option value="bowling">Bowling</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Format</label>
+        <select id="p-format">
+          <option value="odi">ODI</option>
+          <option value="t20">T20</option>
+          <option value="test" selected>Test</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Player</label>
+        <div class="search-wrap">
+          <input id="p-player" placeholder="Start typing a name…" autocomplete="off"
+                 value="{{ initial_player|default('') }}">
+          <div id="opt-player" class="suggestions-pop"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Venue</label>
+        <div class="search-wrap">
+          <input id="p-venue" placeholder="Venue…" autocomplete="off"
+                 value="{{ initial_venue|default('') }}">
+          <div id="opt-venue" class="suggestions-pop"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Opposition</label>
+        <div class="search-wrap">
+          <input id="p-opp" placeholder="Opposition…" autocomplete="off"
+                 value="{{ initial_opposition|default('') }}">
+          <div id="opt-opp" class="suggestions-pop"></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px;">
+      <button id="predict-btn" class="btn-primary" type="button">Predict</button>
+    </div>
+  </form>
+
+  <div id="pred-result" class="result"></div>
+</div>
+
+<script>
+(function(){
+  function $(id){ return document.getElementById(id); }
+  const itype=$('p-type'), ifmt=$('p-format'), iplr=$('p-player'), ivnu=$('p-venue'), iopp=$('p-opp');
+  const result = $('pred-result');
+
+  const endpoints = {
+    batting: { opts:'/api/predict/batting/options', pred:'/api/predict/batting', label:'Predicted Runs' },
+    bowling: { opts:'/api/predict/bowling/options', pred:'/api/predict/bowling', label:'Predicted Wickets' }
+  };
+
+  function debounce(fn, t){ let h; return (...a)=>{ clearTimeout(h); h=setTimeout(()=>fn(...a), t); }; }
+  function popFor(el){ return el.nextElementSibling; }
+  function setOptions(pop, list, input){
+    pop.innerHTML = '';
+    if (!list || !list.length){ pop.style.display='none'; return; }
+    list.forEach(v=>{
+      const b = document.createElement('button');
+      b.type='button'; b.className='suggest-item'; b.textContent=v;
+      b.onclick = ()=>{ input.value=v; pop.style.display='none'; };
+      pop.appendChild(b);
+    });
+    pop.style.display='block';
+  }
+
+  async function fetchOptions(field, q){
+    const ep = endpoints[itype.value].opts;
+    const u = new URL(ep, window.location.origin);
+    u.searchParams.set('field', field);
+    u.searchParams.set('format', ifmt.value);
+    if (q) u.searchParams.set('q', q);
+    const r = await fetch(u);
+    if(!r.ok) return [];
+    const data = await r.json();
+    return data.options || [];
+  }
+
+  const hook = (input, field) => {
+    const run = debounce(async ()=>{
+      const opts = await fetchOptions(field, input.value);
+      setOptions(popFor(input), opts, input);
+    }, 120);
+    input.addEventListener('input', run);
+    input.addEventListener('focus', run);
+    document.addEventListener('click', e=>{
+      const pop = popFor(input);
+      if (!pop.parentElement.contains(e.target)) pop.style.display='none';
+    });
+  };
+  hook(iplr,'player'); hook(ivnu,'venue'); hook(iopp,'opposition');
+
+  // When format/type changes, clear current inputs and popups
+  function clearSelections(){
+    ['opt-player','opt-venue','opt-opp'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+    result.innerHTML = '';
+  }
+  itype.addEventListener('change', clearSelections);
+  ifmt.addEventListener('change', clearSelections);
+
+  $('predict-btn').addEventListener('click', async ()=>{
+    const ep = endpoints[itype.value].pred;
+    const payload = {
+      format: ifmt.value,
+      player: iplr.value.trim(),
+      venue:  ivnu.value.trim(),
+      opposition: iopp.value.trim()
+    };
+    result.innerHTML = '<div class="card" style="margin-top:12px;">Running prediction…</div>';
+    try{
+      const r = await fetch(ep, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const data = await r.json();
+      if(!data.ok){
+        result.innerHTML = `<div class="card" style="margin-top:12px;"><b>Oops:</b> ${data.message || 'Failed'}</div>`;
+        return;
+      }
+      const label = endpoints[itype.value].label;
+      const val = data.predicted_runs ?? data.predicted_wickets ?? data.prediction ?? '—';
+      result.innerHTML = `
+        <div class="card" style="margin-top:12px;">
+          <h3 style="margin:0 0 .5rem;">${label}: ${val}</h3>
+        </div>
+      `;
+    }catch(e){
+      result.innerHTML = `<div class="card" style="margin-top:12px;"><b>Error:</b> ${e}</div>`;
+    }
+  });
+})();
+</script>
+
+<style>
+  .pred-row{ display:grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap:12px; }
+  @media (min-width: 980px){ .pred-row{ grid-template-columns: repeat(3, minmax(260px, 1fr)); } }
+  .field label{ display:block; margin-bottom:6px; color:var(--muted); }
+  .field input, .field select{
+    width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.06); color:var(--text);
+  }
+  .btn-primary{
+    padding:10px 14px; border-radius:12px; border:none; font-weight:700; cursor:pointer;
+    background:linear-gradient(135deg, var(--accent), #46c1ff); color:#001018;
+    box-shadow:0 6px 18px rgba(70,193,255,.35);
+  }
+  .search-wrap{ position:relative; }
+  .suggestions-pop{
+    position:absolute; top:42px; left:0; right:0;
+    background:var(--card); border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px; box-shadow:0 16px 32px rgba(0,0,0,.35);
+    display:none; max-height:300px; overflow:auto; z-index:20;
+  }
+  .suggest-item{
+    display:block; width:100%; text-align:left; padding:10px 12px;
+    background:transparent; color:var(--text); border:none; cursor:pointer;
+  }
+  .suggest-item:hover{ background:rgba(255,255,255,0.06); color:var(--accent); }
+</style>
+
+{% endblock %}
